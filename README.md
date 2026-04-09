@@ -1,30 +1,45 @@
 # AI Clinical Decision Support System
 
-A comprehensive AI-powered clinical decision support system featuring disease prediction, explainable AI, doctor chatbot, 3D visualization, and analytics.
+AI-powered multimodal platform for respiratory decision support across imaging, symptoms, risk scoring, and explainability.
 
-## Architecture
+## What This Project Demonstrates
 
-```
-ai-clinical-decision-system/
-├── frontend/nextjs-dashboard/   — Next.js + TypeScript + TailwindCSS dashboard
-├── backend/                     — Python FastAPI AI server
-├── ai-training/                 — ML training datasets, notebooks, scripts
-├── database/                    — Database schemas and migrations
-└── docs/                        — Documentation
-```
+- Multimodal inference from chest X-ray + clinical text
+- Explainable AI (Grad-CAM and SHAP)
+- Risk prediction and uncertainty estimation
+- Clinical chatbot and patient/case workflows
+- Monitoring, report generation, and analytics export
 
-## Features
+## AI Stack
 
-- **AI Diagnosis** — Upload X-rays and symptoms for disease prediction
-- **Explainable AI** — Grad-CAM heatmaps and SHAP feature importance
-- **Doctor Chatbot** — Medical assistant conversation interface
-- **3D Lung Visualization** — Interactive 3D lung model with disease highlighting
-- **Radiology Reports** — Auto-generated structured medical reports (PDF)
-- **Analytics Dashboard** — Power BI embedded analytics
+- EfficientNet-B0 CNN
+- Diffusion enhancer
+- BioBERT symptom extraction
+- XGBoost risk model
+- Grad-CAM
+- SHAP
+- Monte Carlo dropout uncertainty
+- Embedding-based case similarity
+- Counterfactual analysis
 
-## Getting Started
+## Quick Demo Flow
+
+1. Doctor logs in.
+2. Register/select patient.
+3. Submit X-ray + symptoms.
+4. View diagnosis, confidence, risk, and explanations.
+5. Save case and generate report.
+
+## Tech Stack
+
+- Backend: FastAPI, PyTorch, Transformers, XGBoost, SHAP, PostgreSQL
+- Frontend: Next.js, TypeScript, Tailwind, Recharts, React Three Fiber
+- Reporting/Analytics: PDF generation + CSV export + Power BI embed
+
+## Run Locally
 
 ### Backend
+
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -32,8 +47,17 @@ uvicorn main:app --reload --port 8000
 ```
 
 ### Frontend
+
 ```bash
 cd frontend/nextjs-dashboard
 npm install
 npm run dev
 ```
+
+## Full Technical Documentation
+
+See [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) for full architecture, model rationale, implementation status, API details, workflow, and limitations.
+
+## Clinical Safety Notice
+
+This system is a clinical decision support tool and must be used with qualified medical oversight. It is not a standalone diagnostic device.
