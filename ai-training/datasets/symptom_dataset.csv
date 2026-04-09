@@ -1,0 +1,91 @@
+symptoms_text,disease_label,age,severity_score
+"persistent cough, high fever, chest pain, difficulty breathing, green sputum",Pneumonia,45,0.78
+"dry cough, mild fever, fatigue, muscle aches",Pneumonia,32,0.45
+"productive cough, fever, chills, shortness of breath, pleuritic chest pain",Pneumonia,67,0.85
+"cough with yellow sputum, fever, rapid breathing, sweating",Pneumonia,55,0.72
+"high fever, severe cough, chest tightness, wheezing, malaise",Pneumonia,38,0.68
+"mild cough, low-grade fever, fatigue, loss of appetite",Pneumonia,28,0.35
+"persistent cough, fever, chest pain on deep breath, confusion",Pneumonia,72,0.88
+"cough, fever, breathlessness, nausea, body aches",Pneumonia,41,0.62
+"wet cough, high fever, rapid pulse, sweating, chest discomfort",Pneumonia,59,0.75
+"productive cough, moderate fever, headache, shortness of breath",Pneumonia,35,0.55
+"mild dry cough, fatigue, low fever, runny nose",Pneumonia,25,0.30
+"severe cough, high fever, chest pain, confusion, cyanosis",Pneumonia,78,0.92
+"cough with bloody sputum, fever, night sweats, weight loss, fatigue",Pneumonia,63,0.82
+"persistent cough, fever, rib pain when breathing, weakness",Pneumonia,50,0.65
+"cough, fever, rapid shallow breathing, abdominal pain",Pneumonia,44,0.58
+"chronic cough, night sweats, weight loss, fever, fatigue, hemoptysis",Tuberculosis,34,0.82
+"persistent cough lasting weeks, low-grade fever, evening sweats, appetite loss",Tuberculosis,42,0.75
+"cough with blood-tinged sputum, fever, night sweats, significant weight loss",Tuberculosis,56,0.88
+"chronic productive cough, fatigue, weight loss, fever, chest pain",Tuberculosis,29,0.70
+"prolonged cough, night sweats, weight loss, loss of appetite, malaise",Tuberculosis,48,0.78
+"persistent dry cough, low fever, excessive night sweating, weakness",Tuberculosis,37,0.65
+"cough lasting over 3 weeks, hemoptysis, weight loss, fever",Tuberculosis,61,0.85
+"chronic cough, night sweats, fatigue, reduced appetite, fever",Tuberculosis,25,0.60
+"productive cough, blood in sputum, weight loss, evening fever, chills",Tuberculosis,53,0.80
+"long-standing cough, night sweats, cachexia, low-grade fever",Tuberculosis,44,0.72
+"persistent cough, hemoptysis, weight loss, fatigue, bone pain",Tuberculosis,68,0.90
+"chronic cough, night sweats, weight loss, lymph node swelling",Tuberculosis,31,0.68
+"cough, fever, night sweats, weight loss, back pain",Tuberculosis,40,0.74
+"persistent productive cough, night sweats, appetite loss, weight loss",Tuberculosis,58,0.77
+"chronic cough, hemoptysis, fever, fatigue, muscle wasting",Tuberculosis,46,0.83
+"dry cough, fever, fatigue, loss of taste, loss of smell, body aches",COVID-19,30,0.55
+"fever, dry cough, extreme fatigue, shortness of breath, headache",COVID-19,45,0.72
+"mild cough, fever, sore throat, loss of taste and smell, diarrhea",COVID-19,28,0.42
+"severe breathlessness, high fever, dry cough, chest tightness, fatigue",COVID-19,65,0.88
+"fever, cough, body aches, loss of taste, congestion, fatigue",COVID-19,35,0.50
+"persistent dry cough, fever, shortness of breath, anosmia, headache",COVID-19,52,0.68
+"mild fever, cough, fatigue, muscle pain, loss of smell",COVID-19,22,0.35
+"high fever, severe cough, difficulty breathing, chest pain, confusion",COVID-19,70,0.92
+"cough, fever, diarrhea, loss of taste, body aches, sore throat",COVID-19,40,0.48
+"dry cough, mild fever, fatigue, anosmia, ageusia, headache",COVID-19,33,0.45
+"fever, persistent cough, breathlessness, fatigue, myalgia",COVID-19,58,0.75
+"sore throat, cough, fever, loss of taste, runny nose, fatigue",COVID-19,26,0.38
+"severe breathlessness, cough, fever, desaturation, confusion",COVID-19,72,0.95
+"cough, fever, fatigue, headache, anosmia, chest tightness",COVID-19,47,0.62
+"mild cough, low-grade fever, fatigue, joint pain, loss of smell",COVID-19,38,0.40
+"persistent cough, unexplained weight loss, chest pain, hemoptysis, fatigue",Lung Cancer,62,0.85
+"chronic cough, hoarseness, weight loss, bone pain, shortness of breath",Lung Cancer,68,0.90
+"cough with blood, significant weight loss, chest pain, fatigue, appetite loss",Lung Cancer,55,0.82
+"persistent cough, unexplained weight loss, recurring pneumonia, chest pain",Lung Cancer,70,0.88
+"chronic cough, hemoptysis, weight loss, shoulder pain, wheezing",Lung Cancer,58,0.78
+"persistent cough, weight loss, fatigue, bone pain, hoarseness",Lung Cancer,73,0.92
+"cough, hemoptysis, chest pain, weight loss, shortness of breath",Lung Cancer,64,0.84
+"chronic cough, unexplained weight loss, appetite loss, chest discomfort",Lung Cancer,51,0.72
+"persistent cough, hemoptysis, weight loss, recurrent infections, weakness",Lung Cancer,66,0.86
+"cough, weight loss, chest pain, hoarseness, finger clubbing",Lung Cancer,60,0.80
+"chronic cough, hemoptysis, weight loss, bone pain, fatigue",Lung Cancer,75,0.94
+"persistent dry cough, unexplained weight loss, back pain, fatigue",Lung Cancer,57,0.76
+"cough with blood, chest wall pain, weight loss, appetite loss",Lung Cancer,69,0.87
+"chronic cough, shoulder pain, weight loss, hoarseness, fatigue",Lung Cancer,63,0.81
+"persistent cough, hemoptysis, weight loss, dyspnea, chest tightness",Lung Cancer,71,0.89
+"shortness of breath, chest pain, dry cough, fever, reduced breath sounds",Pleural Effusion,50,0.72
+"progressive breathlessness, pleuritic chest pain, dry cough, malaise",Pleural Effusion,58,0.78
+"difficulty breathing, dull chest pain, cough, fever, weight loss",Pleural Effusion,45,0.65
+"shortness of breath, chest heaviness, dry cough, fever, fatigue",Pleural Effusion,62,0.80
+"breathlessness on exertion, unilateral chest pain, cough, malaise",Pleural Effusion,55,0.70
+"progressive dyspnea, pleuritic pain, dry cough, reduced breath sounds",Pleural Effusion,67,0.82
+"shortness of breath, chest pain, cough, fever, night sweats",Pleural Effusion,42,0.68
+"difficulty breathing lying down, chest discomfort, dry cough, fatigue",Pleural Effusion,70,0.85
+"breathlessness, unilateral chest pain, dry cough, weight loss",Pleural Effusion,48,0.72
+"progressive shortness of breath, chest pain, cough, ankle swelling",Pleural Effusion,65,0.78
+"dyspnea, pleuritic chest pain, cough, fever, malaise",Pleural Effusion,53,0.74
+"breathlessness, chest heaviness, reduced exercise tolerance, cough",Pleural Effusion,60,0.76
+"shortness of breath, dull chest pain, cough, fatigue, appetite loss",Pleural Effusion,57,0.71
+"progressive breathlessness, chest tightness, dry cough, night sweats",Pleural Effusion,46,0.67
+"dyspnea, pleuritic pain, dry cough, fever, weight loss, fatigue",Pleural Effusion,72,0.88
+"no symptoms, routine chest X-ray, healthy, no complaints",Normal,30,0.05
+"mild occasional cough, no fever, no weight loss, feels well",Normal,25,0.08
+"routine checkup, no respiratory symptoms, no fever, healthy",Normal,40,0.03
+"pre-operative screening, no cough, no fever, no chest pain",Normal,55,0.04
+"annual physical exam, no symptoms, healthy, active lifestyle",Normal,35,0.02
+"routine screening, occasional mild fatigue, no cough, no fever",Normal,48,0.10
+"no complaints, regular checkup, no respiratory issues",Normal,28,0.03
+"pre-employment screening, healthy, no symptoms, no concerns",Normal,32,0.02
+"annual checkup, mild seasonal allergies, no cough, no fever",Normal,42,0.07
+"routine exam, no chest pain, no cough, no breathlessness",Normal,38,0.04
+"wellness visit, no symptoms, active, no respiratory complaints",Normal,45,0.03
+"pre-surgical clearance, healthy, no cough, no fever, no weight loss",Normal,60,0.05
+"routine screening, no symptoms, non-smoker, no family history",Normal,33,0.02
+"annual physical, no complaints, no respiratory symptoms",Normal,50,0.04
+"checkup, mild stress, no cough, no fever, no chest issues",Normal,36,0.06

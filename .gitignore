@@ -1,0 +1,45 @@
+# OS and editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Logs and runtime
+*.log
+backend/logs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Data and model artifacts (keep docs, avoid huge binary commits)
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+*.joblib
+*.pkl
+ai-training/datasets/chest_xray/
+data/
+
+# If you want these tracked later, remove entries above and re-add explicitly.
