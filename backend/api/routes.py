@@ -1,23 +1,59 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends
-from services.prediction_service import PredictionService
-from chatbot.medical_chatbot import MedicalChatbot
-from chatbot.clinical_chatbot_engine import ClinicalChatbotEngine
 from reports.report_generator import ReportGenerator
-from explainability.gradcam import GradCAM
-from explainability.shap_explainer import SHAPExplainer
-from generative.diffusion_enhancer import DiffusionEnhancer
 from auth.auth_handler import get_current_user
 from database.models import User
 from pydantic import BaseModel
 
 router = APIRouter()
-prediction_service = PredictionService()
-chatbot = MedicalChatbot()
-clinical_chatbot = ClinicalChatbotEngine()
-report_generator = ReportGenerator()
-gradcam = GradCAM()
-shap_explainer = SHAPExplainer()
-diffusion_enhancer = DiffusionEnhancer()
+# Keep optional ML artifacts out of application startup.  Free-tier workers
+# must be able to boot and serve core patient/case workflows without them.
+prediction_service = None
+chatbot = None
+clinical_chatbot = None
+report_generator = None
+gradcam = None
+shap_explainer = None
+
+def _prediction_service():
+    global prediction_service
+    if prediction_service is None:
+        from services.prediction_service import PredictionService
+        prediction_service = PredictionService()
+    return prediction_service
+
+def _chatbot():
+    global chatbot
+    if chatbot is None:
+        from chatbot.medical_chatbot import MedicalChatbot
+        chatbot = MedicalChatbot()
+    return chatbot
+
+def _clinical_chatbot():
+    global clinical_chatbot
+    if clinical_chatbot is None:
+        from chatbot.clinical_chatbot_engine import ClinicalChatbotEngine
+        clinical_chatbot = ClinicalChatbotEngine()
+    return clinical_chatbot
+
+def _report_generator():
+    global report_generator
+    if report_generator is None:
+        report_generator = ReportGenerator()
+    return report_generator
+
+def _gradcam():
+    global gradcam
+    if gradcam is None:
+        from explainability.gradcam import GradCAM
+        gradcam = GradCAM()
+    return gradcam
+
+def _shap_explainer():
+    global shap_explainer
+    if shap_explainer is None:
+        from explainability.shap_explainer import SHAPExplainer
+        shap_explainer = SHAPExplainer()
+    return shap_explainer
 
 
 class ChatRequest(BaseModel):
@@ -32,6 +68,10 @@ class ReportRequest(BaseModel):
     risk_level: str
     symptoms: str
     patient_age: str = "N/A"
+    patient_name: str = "Not Provided"
+    patient_code: str = "N/A"
+    hospital_name: str = "General Hospital"
+    requesting_clinician: str = "AI Clinical Team"
     scan_type: str = "Chest X-ray"
     gradcam_explanation: str = ""
     shap_explanation: str = ""
@@ -46,25 +86,34 @@ async def predict_disease(
     symptoms: str = Form(...),
     current_user: User = Depends(get_current_user),
 ):
+    from models.artifact_status import model_artifact_status
+    from fastapi import HTTPException
+    available, reason = model_artifact_status()
+    if not available:
+        raise HTTPException(status_code=503, detail=f"Chest X-ray analysis is unavailable: {reason}")
     image_bytes = await xray.read()
-    result = prediction_service.predict(image_bytes, symptoms)
+    result = _prediction_service().predict(image_bytes, symptoms)
     return result
 
 
 @router.post("/chatbot")
 async def chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
-    response = chatbot.get_response(request.message, request.conversation_id)
+    response = _chatbot().get_response(request.message, request.conversation_id)
     return response
 
 
 @router.post("/generate-report")
 async def generate_report(request: ReportRequest, current_user: User = Depends(get_current_user)):
-    report = report_generator.generate(
+    report = _report_generator().generate(
         predicted_disease=request.predicted_disease,
         confidence=request.confidence,
         risk_level=request.risk_level,
         symptoms=request.symptoms,
         patient_age=request.patient_age,
+        patient_name=request.patient_name,
+        patient_code=request.patient_code,
+        hospital_name=request.hospital_name,
+        requesting_clinician=request.requesting_clinician,
         scan_type=request.scan_type,
         gradcam_explanation=request.gradcam_explanation,
         shap_explanation=request.shap_explanation,
@@ -77,13 +126,15 @@ async def generate_report(request: ReportRequest, current_user: User = Depends(g
 
 @router.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    from models.artifact_status import model_artifact_status
+    available, detail = model_artifact_status()
+    return {"status": "healthy", "xray_model": "available" if available else "unavailable", "xray_model_detail": detail, "clinical_note": "Not a diagnostic device"}
 
 
 @router.post("/explain/gradcam")
 async def explain_gradcam(xray: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     image_bytes = await xray.read()
-    result = gradcam.generate_heatmap(image_bytes)
+    result = _gradcam().generate_heatmap(image_bytes)
     return result
 
 
@@ -94,15 +145,14 @@ class SHAPRequest(BaseModel):
 
 @router.post("/explain/shap")
 async def explain_shap(request: SHAPRequest, current_user: User = Depends(get_current_user)):
-    result = shap_explainer.explain(request.symptoms, request.predicted_disease)
+    result = _shap_explainer().explain(request.symptoms, request.predicted_disease)
     return result
 
 
 @router.post("/enhance-xray")
 async def enhance_xray(xray: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    image_bytes = await xray.read()
-    result = diffusion_enhancer.enhance_xray(image_bytes)
-    return result
+    from fastapi import HTTPException
+    raise HTTPException(status_code=503, detail="X-ray enhancement is unavailable because validated denoiser weights are not installed.")
 
 
 # ── Clinical Chatbot (BioBERT-powered) ────────────────────────
@@ -111,7 +161,7 @@ async def enhance_xray(xray: UploadFile = File(...), current_user: User = Depend
 @router.post("/clinical-chatbot")
 async def clinical_chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """BioBERT-powered clinical interview chatbot with symptom extraction."""
-    response = clinical_chatbot.process_message(
+    response = _clinical_chatbot().process_message(
         request.message,
         request.conversation_id,
         request.patient_age,
@@ -136,7 +186,8 @@ async def clinical_chatbot_scan(
     image_bytes = await xray.read()
 
     # Get clinical context from chatbot session
-    session = clinical_chatbot.sessions.get(conversation_id)
+    bot = _clinical_chatbot()
+    session = bot.sessions.get(conversation_id)
     symptoms = ""
     clinical_context = {}
     if session:
@@ -149,7 +200,7 @@ async def clinical_chatbot_scan(
         }
 
     # Run full prediction pipeline with chatbot-gathered symptoms
-    result = prediction_service.predict(
+    result = _prediction_service().predict(
         image_bytes=image_bytes,
         symptoms=symptoms if symptoms else "none reported",
     )

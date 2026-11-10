@@ -1,4 +1,6 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+// Same-origin /api is the production default; NEXT_PUBLIC_API_URL is only
+// needed for an explicit local split-stack setup.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -179,6 +181,10 @@ export async function generateReport(data: {
   risk_level: string;
   symptoms: string;
   patient_age?: string;
+  patient_name?: string;
+  patient_code?: string;
+  hospital_name?: string;
+  requesting_clinician?: string;
   scan_type?: string;
   gradcam_explanation?: string;
   shap_explanation?: string;

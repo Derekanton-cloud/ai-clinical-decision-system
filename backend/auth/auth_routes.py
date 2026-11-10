@@ -49,14 +49,22 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         )
         .first()
     )
-    if not user or not verify_password(request.password, user.password_hash):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+    # One-time compatibility path for databases created by older releases.
+    # Successful legacy logins are converted before a token is issued.
+    legacy_match = not user.password_hash.startswith(("$2a$", "$2b$", "$2y$")) and request.password == user.password_hash
+    if not legacy_match and not verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
 
     # Auto-upgrade plain-text passwords to bcrypt
-    if not user.password_hash.startswith(("$2b$", "$2a$")):
+    if legacy_match:
         user.password_hash = hash_password(request.password)
         db.commit()
 

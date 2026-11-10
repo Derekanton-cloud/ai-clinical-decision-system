@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useMemo, useEffect } from "react";
-import { Canvas, useFrame, useLoader, type RootState } from "@react-three/fiber";
-import { OrbitControls, Html, Text, useGLTF, Environment } from "@react-three/drei";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -18,128 +18,271 @@ interface LungVisualizationProps {
   animate?: boolean;
 }
 
-/* ── Glowing volumetric infection marker ── */
+type RenderMode = "standard" | "ct" | "qa";
+type LobeName =
+  | "left_upper_lobe"
+  | "left_lower_lobe"
+  | "right_upper_lobe"
+  | "right_middle_lobe"
+  | "right_lower_lobe";
+
+type LobeMeshMap = Partial<Record<LobeName, THREE.Mesh>>;
+
+const LOBE_NAMES: LobeName[] = [
+  "left_upper_lobe",
+  "left_lower_lobe",
+  "right_upper_lobe",
+  "right_middle_lobe",
+  "right_lower_lobe",
+];
+
+const LOBE_NEIGHBORS: Record<LobeName, LobeName[]> = {
+  left_upper_lobe: ["left_lower_lobe"],
+  left_lower_lobe: ["left_upper_lobe"],
+  right_upper_lobe: ["right_middle_lobe"],
+  right_middle_lobe: ["right_upper_lobe", "right_lower_lobe"],
+  right_lower_lobe: ["right_middle_lobe"],
+};
+
+function clamp01(v: number) {
+  return Math.min(1, Math.max(0, v));
+}
+
+function getFocusLobe(fr: FocusRegion): LobeName {
+  const left = fr.x < 0.5;
+  if (left) {
+    return fr.y < 0.52 ? "left_upper_lobe" : "left_lower_lobe";
+  }
+  if (fr.y < 0.34) return "right_upper_lobe";
+  if (fr.y < 0.62) return "right_middle_lobe";
+  return "right_lower_lobe";
+}
+
+function computeLobeSeverities(
+  stage: 0 | 1 | 2 | 3,
+  focusLobe: LobeName,
+  intensity: number,
+): Record<LobeName, number> {
+  const out = Object.fromEntries(LOBE_NAMES.map((n) => [n, 0])) as Record<LobeName, number>;
+  const i = clamp01(intensity);
+
+  if (stage === 0) {
+    out[focusLobe] = 0.35 * i;
+    return out;
+  }
+
+  if (stage === 1) {
+    out[focusLobe] = 0.62 * i;
+    for (const n of LOBE_NEIGHBORS[focusLobe]) out[n] = 0.24 * i;
+    return out;
+  }
+
+  if (stage === 2) {
+    out[focusLobe] = 0.88 * i;
+    for (const n of LOBE_NEIGHBORS[focusLobe]) out[n] = 0.5 * i;
+    for (const n of LOBE_NAMES) {
+      if (out[n] === 0) {
+        const sameSide = focusLobe.startsWith("left") === n.startsWith("left");
+        out[n] = sameSide ? 0.26 * i : 0.18 * i;
+      }
+    }
+    return out;
+  }
+
+  for (const n of LOBE_NAMES) out[n] = 0.5 * i;
+  out[focusLobe] = Math.min(1, 0.95 * i + 0.12);
+  return out;
+}
+
+function severityColor(severity: number) {
+  const s = clamp01(severity);
+  const green = new THREE.Color("#3fcd6f");
+  const yellow = new THREE.Color("#efbf3f");
+  const red = new THREE.Color("#e24a3f");
+  if (s < 0.5) {
+    return green.clone().lerp(yellow, s / 0.5);
+  }
+  return yellow.clone().lerp(red, (s - 0.5) / 0.5);
+}
+
+function findNamedLobeMeshes(root: THREE.Object3D): LobeMeshMap {
+  const out: LobeMeshMap = {};
+  root.traverse((obj) => {
+    if (!(obj as THREE.Mesh).isMesh) return;
+    const mesh = obj as THREE.Mesh;
+    const name = (mesh.name || "").toLowerCase();
+    for (const lobe of LOBE_NAMES) {
+      if (name.includes(lobe)) out[lobe] = mesh;
+    }
+  });
+  return out;
+}
+
+function fitRootToCenteredSpan(root: THREE.Object3D, targetSpan = 2.2) {
+  const box = new THREE.Box3().setFromObject(root);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+  root.position.sub(center);
+  const scale = targetSpan / maxDim;
+  root.scale.setScalar(scale);
+}
+
+function mapFocusToLobeVolume(mesh: THREE.Mesh | undefined, fr: FocusRegion): [number, number, number] {
+  if (!mesh) {
+    const left = fr.x < 0.5;
+    const localX = left ? fr.x / 0.5 : (fr.x - 0.5) / 0.5;
+    return [
+      (left ? -0.7 : 0.7) + (localX - 0.5) * 0.32,
+      0.6 - fr.y * 1.16,
+      0.06,
+    ];
+  }
+
+  mesh.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = box.getSize(new THREE.Vector3());
+  const left = fr.x < 0.5;
+  const localX = left ? fr.x / 0.5 : (fr.x - 0.5) / 0.5;
+
+  const padX = size.x * 0.2;
+  const padY = size.y * 0.18;
+  const padZ = size.z * 0.26;
+
+  const x = THREE.MathUtils.lerp(box.min.x + padX, box.max.x - padX, clamp01(localX));
+  const y = THREE.MathUtils.lerp(box.max.y - padY, box.min.y + padY, clamp01(fr.y));
+  const z = THREE.MathUtils.lerp(box.min.z + padZ, box.max.z - padZ, 0.56);
+
+  return [x, y, z];
+}
+
 function InfectionMarker({
   position,
   intensity,
+  stage,
   label,
+  renderMode,
 }: {
   position: [number, number, number];
   intensity: number;
+  stage: 0 | 1 | 2 | 3;
   label?: string;
+  renderMode: RenderMode;
 }) {
   const coreRef = useRef<THREE.Mesh>(null);
-  const glowRef = useRef<THREE.Mesh>(null);
-  const outerRef = useRef<THREE.Mesh>(null);
+  const edemaRef = useRef<THREE.Mesh>(null);
+  const haloRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.Points>(null);
   const [hovered, setHovered] = useState(false);
 
-  // Generate particle positions around the infection site
-  const particleData = useMemo(() => {
-    const count = 30;
-    const positions = new Float32Array(count * 3);
-    const sizes = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      const r = 0.15 + Math.random() * 0.25;
-      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      positions[i * 3 + 2] = r * Math.cos(phi);
-      sizes[i] = Math.random() * 0.03 + 0.01;
+  const stageBoost = [0.0, 0.16, 0.34, 0.52][stage];
+  const baseRadius = 0.05 + clamp01(intensity) * 0.05 + stageBoost * 0.045;
+
+  const lesionGeometry = useMemo(() => {
+    const g = new THREE.IcosahedronGeometry(baseRadius, 3);
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const n = Math.sin(x * 17.1) * Math.cos(y * 11.8) * Math.sin(z * 9.7);
+      const r = 1 + n * 0.16;
+      pos.setXYZ(i, x * r, y * r * 1.05, z * r * 0.93);
     }
-    return { positions, sizes };
-  }, []);
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, [baseRadius]);
+
+  const particleData = useMemo(() => {
+    const count = 90;
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      arr[i * 3] = THREE.MathUtils.randFloatSpread(1) * baseRadius * 1.5;
+      arr[i * 3 + 1] = THREE.MathUtils.randFloatSpread(1) * baseRadius * 1.1;
+      arr[i * 3 + 2] = THREE.MathUtils.randFloatSpread(1) * baseRadius * 1.3;
+    }
+    return arr;
+  }, [baseRadius]);
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
-    const pulse = 1 + Math.sin(t * 2) * 0.2;
-    if (coreRef.current) coreRef.current.scale.setScalar(pulse);
-    if (glowRef.current) {
-      glowRef.current.scale.setScalar(pulse * 1.3);
-      (glowRef.current.material as THREE.MeshStandardMaterial).opacity =
-        0.25 + Math.sin(t * 3) * 0.1;
+    const p = 1 + Math.sin(t * 2.2) * 0.08;
+    if (coreRef.current) {
+      coreRef.current.scale.set(1 + Math.sin(t * 1.7) * 0.05, p, 1 + Math.sin(t * 1.3) * 0.04);
+      (coreRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.2 + Math.sin(t * 3.2) * 0.35;
     }
-    if (outerRef.current) {
-      outerRef.current.scale.setScalar(pulse * 1.8);
-      (outerRef.current.material as THREE.MeshStandardMaterial).opacity =
-        0.08 + Math.sin(t * 2.5) * 0.04;
+    if (edemaRef.current) edemaRef.current.scale.setScalar(1.2 + Math.sin(t * 1.5) * 0.05);
+    if (haloRef.current) {
+      haloRef.current.scale.setScalar(1.45 + Math.sin(t * 1.1) * 0.04);
+      (haloRef.current.material as THREE.MeshStandardMaterial).opacity = 0.11 + Math.sin(t * 2.1) * 0.02;
     }
     if (particlesRef.current) {
-      particlesRef.current.rotation.y = t * 0.3;
-      particlesRef.current.rotation.x = Math.sin(t * 0.5) * 0.1;
+      particlesRef.current.rotation.y = t * 0.18;
+      particlesRef.current.rotation.x = Math.sin(t * 0.4) * 0.05;
     }
   });
 
-  const radius = 0.12 + intensity * 0.2;
-
   return (
     <group>
-      {/* Inner hot core */}
       <mesh
         ref={coreRef}
         position={position}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
       >
-        <sphereGeometry args={[radius, 16, 16]} />
+        <primitive object={lesionGeometry} attach="geometry" />
         <meshStandardMaterial
-          color="#ff2200"
-          emissive="#ff0000"
-          emissiveIntensity={4}
+          color={renderMode === "qa" ? "#6b7280" : "#ca3f2b"}
+          emissive={renderMode === "qa" ? "#000000" : "#ff4b32"}
+          emissiveIntensity={renderMode === "qa" ? 0 : 2.2}
           transparent
-          opacity={0.95}
+          opacity={renderMode === "qa" ? 0.18 : 0.88}
+          roughness={renderMode === "qa" ? 0.95 : 0.36}
         />
       </mesh>
 
-      {/* Mid glow layer */}
-      <mesh ref={glowRef} position={position}>
-        <sphereGeometry args={[radius * 1.6, 12, 12]} />
+      <mesh ref={edemaRef} position={position}>
+        <primitive object={lesionGeometry} attach="geometry" />
         <meshStandardMaterial
-          color="#ff4400"
-          emissive="#ff2200"
-          emissiveIntensity={2}
+          color={renderMode === "qa" ? "#9ca3af" : "#ff7559"}
+          emissive={renderMode === "qa" ? "#000000" : "#ff5a3d"}
+          emissiveIntensity={renderMode === "qa" ? 0 : 1.1}
           transparent
-          opacity={0.25}
+          opacity={renderMode === "qa" ? 0.08 : 0.2}
         />
       </mesh>
 
-      {/* Outer ambient glow */}
-      <mesh ref={outerRef} position={position}>
-        <sphereGeometry args={[radius * 2.5, 10, 10]} />
+      <mesh ref={haloRef} position={position}>
+        <sphereGeometry args={[baseRadius * 2.0, 12, 12]} />
         <meshStandardMaterial
-          color="#ff6600"
-          emissive="#ff3300"
-          emissiveIntensity={0.8}
+          color={renderMode === "qa" ? "#d1d5db" : "#ff6e4f"}
+          emissive={renderMode === "qa" ? "#000000" : "#ff5136"}
+          emissiveIntensity={renderMode === "qa" ? 0 : 0.95}
           transparent
-          opacity={0.08}
+          opacity={renderMode === "qa" ? 0.05 : 0.11}
         />
       </mesh>
 
-      {/* Floating infection particles */}
       <points ref={particlesRef} position={position}>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={particleData.positions.length / 3}
-            array={particleData.positions}
-            itemSize={3}
-          />
+          <bufferAttribute attach="attributes-position" count={particleData.length / 3} array={particleData} itemSize={3} />
         </bufferGeometry>
-        <pointsMaterial
-          color="#ff4444"
-          size={0.02}
-          transparent
-          opacity={0.6}
-          sizeAttenuation
-        />
+        <pointsMaterial color={renderMode === "qa" ? "#e5e7eb" : "#ff9e84"} size={0.01} transparent opacity={renderMode === "qa" ? 0.18 : 0.4} sizeAttenuation />
       </points>
 
-      {/* Hover tooltip */}
+      <pointLight
+        position={position}
+        color={renderMode === "qa" ? "#f8fafc" : "#ff4d33"}
+        intensity={renderMode === "qa" ? 0.12 : 0.9 + clamp01(intensity) * 1.5 + stage * 0.25}
+        distance={1.3}
+        decay={2.1}
+      />
+
       {hovered && label && (
-        <Html position={[position[0], position[1] + radius + 0.45, position[2]]}>
-          <div className="rounded-lg bg-red-600/90 px-3 py-1.5 text-xs font-semibold text-white shadow-xl whitespace-nowrap backdrop-blur-sm border border-red-400/30">
-            ⚠ {label} — {Math.round(intensity * 100)}% intensity
+        <Html position={[position[0], position[1] + baseRadius + 0.35, position[2]]}>
+          <div className="rounded-lg border border-red-300/40 bg-red-700/90 px-3 py-1.5 text-xs font-semibold text-white shadow-xl whitespace-nowrap">
+            {label} • Stage {stage}
           </div>
         </Html>
       )}
@@ -147,478 +290,153 @@ function InfectionMarker({
   );
 }
 
-/* ── Anatomical lung lobe (tapered ellipsoid) ── */
-function LungLobe({
-  position,
-  scale,
-  color,
-  lobeRef,
-}: {
-  position: [number, number, number];
-  scale: [number, number, number];
-  color: string;
-  lobeRef?: React.RefObject<THREE.Mesh>;
-}) {
-  return (
-    <mesh ref={lobeRef as React.RefObject<THREE.Mesh>} position={position} scale={scale}>
-      <sphereGeometry args={[1, 32, 32]} />
-      <meshPhysicalMaterial
-        color={color}
-        transmission={0.85}
-        roughness={0.15}
-        thickness={0.6}
-        transparent
-        opacity={0.35}
-        ior={1.2}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
-  );
-}
-
-/* ── Bronchial tube segment ── */
-function BronchialTube({
-  start,
-  end,
-  radiusTop,
-  radiusBottom,
-}: {
-  start: [number, number, number];
-  end: [number, number, number];
-  radiusTop: number;
-  radiusBottom: number;
-}) {
-  const { position, rotation, length } = useMemo(() => {
-    const s = new THREE.Vector3(...start);
-    const e = new THREE.Vector3(...end);
-    const mid = s.clone().add(e).multiplyScalar(0.5);
-    const dir = e.clone().sub(s);
-    const len = dir.length();
-    const axis = new THREE.Vector3(0, 1, 0);
-    const quat = new THREE.Quaternion().setFromUnitVectors(axis, dir.normalize());
-    const euler = new THREE.Euler().setFromQuaternion(quat);
-    return {
-      position: [mid.x, mid.y, mid.z] as [number, number, number],
-      rotation: euler,
-      length: len,
-    };
-  }, [start, end]);
-
-  return (
-    <mesh position={position} rotation={rotation}>
-      <cylinderGeometry args={[radiusTop, radiusBottom, length, 16]} />
-      <meshPhysicalMaterial
-        color="#e8b4b8"
-        roughness={0.4}
-        metalness={0.05}
-        transparent
-        opacity={0.7}
-      />
-    </mesh>
-  );
-}
-
-/* ── Alveoli cluster at bronchiole terminals ── */
-function AlveoliCluster({ position }: { position: [number, number, number] }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const offsets = useMemo(() => {
-    const pts: [number, number, number][] = [];
-    for (let i = 0; i < 5; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      const r = 0.04 + Math.random() * 0.05;
-      pts.push([
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi),
-      ]);
-    }
-    return pts;
-  }, []);
-
-  useFrame(({ clock }) => {
-    if (groupRef.current) {
-      const t = clock.getElapsedTime();
-      const s = 1 + Math.sin(t * 1.5) * 0.08;
-      groupRef.current.scale.setScalar(s);
-    }
-  });
-
-  return (
-    <group ref={groupRef} position={position}>
-      {offsets.map((off, i) => (
-        <mesh key={i} position={off}>
-          <sphereGeometry args={[0.025, 8, 8]} />
-          <meshPhysicalMaterial
-            color="#f0a0a8"
-            transparent
-            opacity={0.4}
-            roughness={0.3}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-/* ── Blood vessel network ── */
-function VesselNetwork() {
-  const vessels = useMemo(() => [
-    { start: [0, 0.85, 0.05] as [number, number, number], end: [-0.6, 0.15, 0.15] as [number, number, number], r: 0.02 },
-    { start: [0, 0.85, 0.05] as [number, number, number], end: [0.6, 0.2, 0.15] as [number, number, number], r: 0.02 },
-    { start: [-0.6, 0.15, 0.15] as [number, number, number], end: [-0.85, -0.25, 0.1] as [number, number, number], r: 0.015 },
-    { start: [0.6, 0.2, 0.15] as [number, number, number], end: [0.85, -0.2, 0.1] as [number, number, number], r: 0.015 },
-    { start: [-0.6, 0.15, 0.15] as [number, number, number], end: [-0.7, 0.5, 0.1] as [number, number, number], r: 0.012 },
-    { start: [0.6, 0.2, 0.15] as [number, number, number], end: [0.7, 0.55, 0.1] as [number, number, number], r: 0.012 },
-  ], []);
-
-  return (
-    <group>
-      {vessels.map((v, i) => {
-        const s = new THREE.Vector3(...v.start);
-        const e = new THREE.Vector3(...v.end);
-        const mid = s.clone().add(e).multiplyScalar(0.5);
-        const dir = e.clone().sub(s);
-        const len = dir.length();
-        const axis = new THREE.Vector3(0, 1, 0);
-        const quat = new THREE.Quaternion().setFromUnitVectors(axis, dir.normalize());
-        const euler = new THREE.Euler().setFromQuaternion(quat);
-        return (
-          <mesh key={i} position={[mid.x, mid.y, mid.z]} rotation={euler}>
-            <cylinderGeometry args={[v.r, v.r, len, 8]} />
-            <meshStandardMaterial
-              color="#c44040"
-              transparent
-              opacity={0.35}
-              emissive="#880000"
-              emissiveIntensity={0.3}
-            />
-          </mesh>
-        );
-      })}
-    </group>
-  );
-}
-
-/* ── GLTF Lung Model loader with fallback ── */
-function GLTFLungModel({
+function GLTFLungSystem({
   focusRegion,
   diseaseLabel,
   animate,
-}: LungVisualizationProps) {
-  const groupRef = useRef<THREE.Group>(null);
-  const [gltfLoaded, setGltfLoaded] = useState(false);
-  const [gltfScene, setGltfScene] = useState<THREE.Group | null>(null);
+  renderMode,
+  progressionStage,
+  onLoadFailed,
+}: {
+  focusRegion: FocusRegion;
+  diseaseLabel: string;
+  animate: boolean;
+  renderMode: RenderMode;
+  progressionStage: 0 | 1 | 2 | 3;
+  onLoadFailed: () => void;
+}) {
+  const rootRef = useRef<THREE.Group>(null);
+  const [root, setRoot] = useState<THREE.Group | null>(null);
+  const [lobeMeshes, setLobeMeshes] = useState<LobeMeshMap>({});
 
-  // Try loading GLTF model
+  const focusLobe = useMemo(() => getFocusLobe(focusRegion), [focusRegion]);
+  const severityMap = useMemo(
+    () => computeLobeSeverities(progressionStage, focusLobe, focusRegion.intensity),
+    [progressionStage, focusLobe, focusRegion.intensity],
+  );
+
   useEffect(() => {
+    let disposed = false;
+    const timeout = window.setTimeout(() => {
+      if (!disposed && !root) onLoadFailed();
+    }, 2200);
+
     const loader = new GLTFLoader();
     loader.load(
-      "/models/lungs.glb",
+      "/models/medical_lungs.glb",
       (gltf) => {
-        // Apply semi-transparent medical material to all meshes
-        gltf.scene.traverse((child) => {
-          if ((child as THREE.Mesh).isMesh) {
-            const mesh = child as THREE.Mesh;
-            mesh.material = new THREE.MeshPhysicalMaterial({
-              color: "#bde0fe",
-              transmission: 0.8,
-              roughness: 0.2,
-              thickness: 0.5,
-              transparent: true,
-              opacity: 0.4,
-              ior: 1.2,
-              side: THREE.DoubleSide,
-              emissive: "#4488cc",
-              emissiveIntensity: 0.05,
-            });
-          }
-        });
-        setGltfScene(gltf.scene);
-        setGltfLoaded(true);
+        if (disposed) return;
+        const loaded = gltf.scene;
+        fitRootToCenteredSpan(loaded, 2.15);
+        setLobeMeshes(findNamedLobeMeshes(loaded));
+        setRoot(loaded);
+        window.clearTimeout(timeout);
       },
       undefined,
       () => {
-        // GLTF not found — use procedural fallback
-        setGltfLoaded(false);
-      }
+        if (disposed) return;
+        window.clearTimeout(timeout);
+        onLoadFailed();
+      },
     );
-  }, []);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timeout);
+    };
+  }, [onLoadFailed, root]);
+
+  useEffect(() => {
+    if (!root) return;
+
+    root.traverse((obj) => {
+      if (!(obj as THREE.Mesh).isMesh) return;
+      const mesh = obj as THREE.Mesh;
+      const lowerName = (mesh.name || "").toLowerCase();
+      const lobe = LOBE_NAMES.find((n) => lowerName.includes(n));
+      const severity = lobe ? severityMap[lobe] : 0;
+      const overlay = severityColor(severity);
+      const base = renderMode === "qa" ? new THREE.Color("#b9bec6") : new THREE.Color("#e9a7aa");
+      const color = renderMode === "qa" ? base : base.clone().lerp(overlay, 0.64 * severity);
+
+      mesh.material = new THREE.MeshPhysicalMaterial({
+        color,
+        roughness: renderMode === "qa" ? 0.95 : renderMode === "ct" ? 0.88 : 0.92,
+        metalness: 0,
+        clearcoat: renderMode === "qa" ? 0.02 : renderMode === "ct" ? 0.08 : 0.14,
+        clearcoatRoughness: 0.9,
+        transparent: renderMode === "ct",
+        opacity: renderMode === "ct" ? 0.44 : 1,
+        transmission: renderMode === "ct" ? 0.08 : 0,
+        side: THREE.DoubleSide,
+        emissive: renderMode === "qa" ? new THREE.Color("#000000") : overlay.clone().multiplyScalar(0.2 + severity * 0.18),
+        emissiveIntensity: renderMode === "qa" ? 0 : renderMode === "ct" ? 0.24 : 0.16,
+      });
+
+      mesh.visible = true;
+      mesh.frustumCulled = false;
+      if (!mesh.geometry.attributes.normal) mesh.geometry.computeVertexNormals();
+    });
+  }, [root, renderMode, severityMap]);
 
   useFrame(({ clock }) => {
-    if (!animate || !groupRef.current) return;
+    if (!animate || !rootRef.current) return;
     const t = clock.getElapsedTime();
-    const breathe = 1 + Math.sin(t * 1.2) * 0.025;
-    groupRef.current.scale.setScalar(breathe);
+    const breathe = 1 + Math.sin(t * 1.14) * 0.016;
+    rootRef.current.scale.set(1 + Math.sin(t * 1.01) * 0.01, breathe, 1 + Math.sin(t * 1.2 + 0.18) * 0.008);
   });
 
-  const fr = focusRegion || { x: 0.5, y: 0.5, intensity: 0.5 };
-  const markerX = (fr.x - 0.5) * 2.4;
-  const markerY = (0.5 - fr.y) * 2.0;
+  const focusMesh = lobeMeshes[focusLobe];
+  const lesionPos = mapFocusToLobeVolume(focusMesh, focusRegion);
 
-  if (gltfLoaded && gltfScene) {
-    return (
-      <group ref={groupRef}>
-        <primitive object={gltfScene} scale={1.5} position={[0, 0, 0]} />
-        <InfectionMarker
-          position={[markerX, markerY, 0.15]}
-          intensity={fr.intensity}
-          label={diseaseLabel}
-        />
-      </group>
-    );
-  }
-
-  // Fallback: enhanced procedural model
-  return null;
-}
-
-/* ── Full lung model with anatomical structure (fallback + enhanced) ── */
-function LungModel({
-  focusRegion,
-  diseaseLabel,
-  animate,
-}: LungVisualizationProps) {
-  const leftUpperRef = useRef<THREE.Mesh>(null);
-  const leftLowerRef = useRef<THREE.Mesh>(null);
-  const rightUpperRef = useRef<THREE.Mesh>(null);
-  const rightMiddleRef = useRef<THREE.Mesh>(null);
-  const rightLowerRef = useRef<THREE.Mesh>(null);
-
-  useFrame((state: RootState) => {
-    if (!animate) return;
-    const t = state.clock.getElapsedTime();
-    const breathe = 1 + Math.sin(t * 1.2) * 0.025;
-    const exhale = 1 + Math.sin(t * 1.2 + 0.15) * 0.02;
-    [leftUpperRef, leftLowerRef].forEach((r) => {
-      if (r.current) r.current.scale.set(breathe, breathe, breathe);
-    });
-    [rightUpperRef, rightMiddleRef, rightLowerRef].forEach((r) => {
-      if (r.current) r.current.scale.set(exhale, exhale, exhale);
-    });
-  });
-
-  const fr = focusRegion || { x: 0.5, y: 0.5, intensity: 0.5 };
-  const markerX = (fr.x - 0.5) * 2.4;
-  const markerY = (0.5 - fr.y) * 2.0;
-
-  const lobeColor = "#bde0fe";
+  if (!root) return null;
 
   return (
-    <group>
-      {/* ─── Left Lung (2 lobes) ─── */}
-      <LungLobe
-        position={[-0.85, 0.3, 0]}
-        scale={[0.55, 0.7, 0.45]}
-        color={lobeColor}
-        lobeRef={leftUpperRef}
-      />
-      <LungLobe
-        position={[-0.8, -0.45, 0]}
-        scale={[0.6, 0.6, 0.45]}
-        color={lobeColor}
-        lobeRef={leftLowerRef}
-      />
-
-      {/* ─── Right Lung (3 lobes) ─── */}
-      <LungLobe
-        position={[0.85, 0.4, 0]}
-        scale={[0.55, 0.55, 0.45]}
-        color={lobeColor}
-        lobeRef={rightUpperRef}
-      />
-      <LungLobe
-        position={[0.85, -0.05, 0]}
-        scale={[0.58, 0.4, 0.45]}
-        color={lobeColor}
-        lobeRef={rightMiddleRef}
-      />
-      <LungLobe
-        position={[0.8, -0.5, 0]}
-        scale={[0.6, 0.5, 0.45]}
-        color={lobeColor}
-        lobeRef={rightLowerRef}
-      />
-
-      {/* ─── Trachea ─── */}
-      <BronchialTube
-        start={[0, 1.7, 0]}
-        end={[0, 0.9, 0]}
-        radiusTop={0.1}
-        radiusBottom={0.12}
-      />
-
-      {/* Cartilage rings on trachea */}
-      {[1.6, 1.45, 1.3, 1.15, 1.0].map((y, i) => (
-        <mesh key={i} position={[0, y, 0]}>
-          <torusGeometry args={[0.11, 0.015, 8, 24]} />
-          <meshStandardMaterial color="#d4a0a4" opacity={0.5} transparent />
-        </mesh>
-      ))}
-
-      {/* ─── Main Bronchi ─── */}
-      <BronchialTube
-        start={[0, 0.9, 0]}
-        end={[-0.5, 0.45, 0]}
-        radiusTop={0.09}
-        radiusBottom={0.07}
-      />
-      <BronchialTube
-        start={[0, 0.9, 0]}
-        end={[0.5, 0.5, 0]}
-        radiusTop={0.09}
-        radiusBottom={0.07}
-      />
-
-      {/* ─── Secondary Bronchioles ─── */}
-      <BronchialTube
-        start={[-0.5, 0.45, 0]}
-        end={[-0.75, 0.1, 0]}
-        radiusTop={0.05}
-        radiusBottom={0.04}
-      />
-      <BronchialTube
-        start={[-0.5, 0.45, 0]}
-        end={[-0.9, -0.15, 0.05]}
-        radiusTop={0.04}
-        radiusBottom={0.03}
-      />
-      <BronchialTube
-        start={[0.5, 0.5, 0]}
-        end={[0.75, 0.2, 0]}
-        radiusTop={0.05}
-        radiusBottom={0.04}
-      />
-      <BronchialTube
-        start={[0.5, 0.5, 0]}
-        end={[0.85, -0.1, 0.05]}
-        radiusTop={0.04}
-        radiusBottom={0.03}
-      />
-
-      {/* ─── Tertiary Bronchioles (deeper detail) ─── */}
-      <BronchialTube
-        start={[-0.75, 0.1, 0]}
-        end={[-0.95, -0.05, 0.1]}
-        radiusTop={0.03}
-        radiusBottom={0.02}
-      />
-      <BronchialTube
-        start={[-0.75, 0.1, 0]}
-        end={[-0.65, -0.15, -0.1]}
-        radiusTop={0.03}
-        radiusBottom={0.02}
-      />
-      <BronchialTube
-        start={[0.75, 0.2, 0]}
-        end={[0.95, 0.05, 0.1]}
-        radiusTop={0.03}
-        radiusBottom={0.02}
-      />
-      <BronchialTube
-        start={[0.75, 0.2, 0]}
-        end={[0.65, -0.05, -0.1]}
-        radiusTop={0.03}
-        radiusBottom={0.02}
-      />
-
-      {/* ─── Alveoli at bronchiole endpoints ─── */}
-      <AlveoliCluster position={[-0.95, -0.05, 0.1]} />
-      <AlveoliCluster position={[-0.65, -0.15, -0.1]} />
-      <AlveoliCluster position={[0.95, 0.05, 0.1]} />
-      <AlveoliCluster position={[0.65, -0.05, -0.1]} />
-      <AlveoliCluster position={[-0.9, -0.15, 0.05]} />
-      <AlveoliCluster position={[0.85, -0.1, 0.05]} />
-
-      {/* ─── Blood Vessel Network ─── */}
-      <VesselNetwork />
-
-      {/* ─── Anatomical Labels ─── */}
-      <Text
-        position={[-0.85, 1.15, 0]}
-        fontSize={0.12}
-        color="#94a3b8"
-        anchorX="center"
-        anchorY="middle"
-        font="/fonts/inter.woff"
-      >
-        Left Lung
-      </Text>
-      <Text
-        position={[0.85, 1.15, 0]}
-        fontSize={0.12}
-        color="#94a3b8"
-        anchorX="center"
-        anchorY="middle"
-        font="/fonts/inter.woff"
-      >
-        Right Lung
-      </Text>
-      <Text
-        position={[0.3, 1.7, 0]}
-        fontSize={0.1}
-        color="#94a3b8"
-        anchorX="left"
-        anchorY="middle"
-        font="/fonts/inter.woff"
-      >
-        Trachea
-      </Text>
-
-      {/* ─── Infection Marker ─── */}
+    <group ref={rootRef}>
+      <primitive object={root} />
       <InfectionMarker
-        position={[markerX, markerY, 0.15]}
-        intensity={fr.intensity}
-        label={diseaseLabel}
+        position={lesionPos}
+        intensity={focusRegion.intensity}
+        stage={progressionStage}
+        label={`${diseaseLabel} (${focusLobe.replace(/_/g, " ")})`}
+        renderMode={renderMode}
       />
     </group>
   );
 }
 
-/* ── Scene wrapper: tries GLTF first, falls back to procedural ── */
-function LungScene({
+function ProceduralFallback({
   focusRegion,
   diseaseLabel,
-  animate,
-}: LungVisualizationProps) {
-  const [useGLTF, setUseGLTF] = useState(true);
-  const [checked, setChecked] = useState(false);
+  progressionStage,
+  renderMode,
+}: {
+  focusRegion: FocusRegion;
+  diseaseLabel: string;
+  progressionStage: 0 | 1 | 2 | 3;
+  renderMode: RenderMode;
+}) {
+  const leftGeo = useMemo(() => new THREE.SphereGeometry(0.56, 48, 48), []);
+  const rightGeo = useMemo(() => new THREE.SphereGeometry(0.58, 48, 48), []);
+  const lobe = getFocusLobe(focusRegion);
+  const pos = mapFocusToLobeVolume(undefined, focusRegion);
 
-  useEffect(() => {
-    // Check if GLTF model exists
-    fetch("/models/lungs.glb", { method: "HEAD" })
-      .then((res) => {
-        setUseGLTF(res.ok);
-        setChecked(true);
-      })
-      .catch(() => {
-        setUseGLTF(false);
-        setChecked(true);
-      });
-  }, []);
-
-  if (!checked) {
-    return (
-      <LungModel
-        focusRegion={focusRegion}
-        diseaseLabel={diseaseLabel}
-        animate={animate}
+  return (
+    <group>
+      <mesh geometry={leftGeo} position={[-0.63, 0.03, 0]} scale={[0.78, 1.16, 0.7]}>
+        <meshPhysicalMaterial color={renderMode === "qa" ? "#bfc4cc" : "#e3a6aa"} roughness={0.9} metalness={0} />
+      </mesh>
+      <mesh geometry={rightGeo} position={[0.63, 0.03, 0]} scale={[0.82, 1.18, 0.73]}>
+        <meshPhysicalMaterial color={renderMode === "qa" ? "#c9ced5" : "#e7adb0"} roughness={0.9} metalness={0} />
+      </mesh>
+      <InfectionMarker
+        position={pos}
+        intensity={focusRegion.intensity}
+        stage={progressionStage}
+        label={`${diseaseLabel} (${lobe.replace(/_/g, " ")})`}
+        renderMode={renderMode}
       />
-    );
-  }
-
-  return useGLTF ? (
-    <GLTFLungModel
-      focusRegion={focusRegion}
-      diseaseLabel={diseaseLabel}
-      animate={animate}
-    />
-  ) : (
-    <LungModel
-      focusRegion={focusRegion}
-      diseaseLabel={diseaseLabel}
-      animate={animate}
-    />
+    </group>
   );
 }
 
@@ -627,13 +445,20 @@ export default function LungVisualization({
   diseaseLabel = "Affected Region",
   animate = true,
 }: LungVisualizationProps) {
-  // WebGL detection
+  const [renderMode, setRenderMode] = useState<RenderMode>("standard");
+  const [progressionStage, setProgressionStage] = useState<0 | 1 | 2 | 3>(1);
   const [webglSupported, setWebglSupported] = useState(true);
+  const [glbFailed, setGlbFailed] = useState(false);
+
+  const fr = focusRegion || { x: 0.5, y: 0.5, intensity: 0.5 };
+
   useEffect(() => {
     try {
       const canvas = document.createElement("canvas");
       const supported = !!(
-        canvas.getContext("webgl") || canvas.getContext("webgl2") || canvas.getContext("experimental-webgl")
+        canvas.getContext("webgl") ||
+        canvas.getContext("webgl2") ||
+        canvas.getContext("experimental-webgl")
       );
       setWebglSupported(supported);
     } catch {
@@ -643,27 +468,14 @@ export default function LungVisualization({
 
   if (!webglSupported) {
     return (
-      <div className="h-full w-full min-h-[400px] rounded-xl bg-gradient-to-b from-slate-950 via-slate-900 to-slate-800 relative overflow-hidden flex items-center justify-center">
-        <div className="text-center px-6">
-          <div className="mx-auto mb-4 rounded-full bg-slate-700 p-4 w-fit">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          </div>
-          <p className="text-sm font-semibold text-slate-300">3D visualization unavailable</p>
-          <p className="mt-1 text-xs text-slate-500">WebGL is not supported by your browser. The AI analysis results above remain fully valid.</p>
-          {diseaseLabel && (
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-red-500/10 border border-red-500/20 px-3 py-1.5">
-              <span className="h-2 w-2 rounded-full bg-red-500" />
-              <span className="text-xs font-medium text-red-400">{diseaseLabel}</span>
-            </div>
-          )}
-        </div>
+      <div className="h-full min-h-[420px] w-full rounded-xl bg-slate-900 p-6 text-center text-slate-300">
+        WebGL is unavailable. 3D visualization cannot be rendered in this browser.
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full min-h-[400px] rounded-xl bg-gradient-to-b from-slate-950 via-slate-900 to-slate-800 relative overflow-hidden">
-      {/* Subtle grid overlay */}
+    <div className="relative h-full min-h-[420px] w-full overflow-hidden rounded-xl bg-gradient-to-b from-slate-950 via-slate-900 to-slate-800">
       <div
         className="absolute inset-0 opacity-[0.03]"
         style={{
@@ -673,90 +485,139 @@ export default function LungVisualization({
         }}
       />
 
-      {/* CT scan style scanline effect */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,200,255,0.1) 2px, transparent 4px)",
+      <Canvas
+        camera={{ position: [0, 0, 3.1], fov: 38, near: 0.01, far: 100 }}
+        dpr={[1, 1.7]}
+        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+        onCreated={({ gl }) => {
+          const renderer = gl as THREE.WebGLRenderer & {
+            physicallyCorrectLights?: boolean;
+            useLegacyLights?: boolean;
+          };
+          if ("physicallyCorrectLights" in renderer) renderer.physicallyCorrectLights = true;
+          if ("useLegacyLights" in renderer) renderer.useLegacyLights = false;
         }}
-      />
+      >
+        {renderMode === "qa" ? (
+          <>
+            <fog attach="fog" args={["#111827", 3.8, 8.2]} />
+            <ambientLight intensity={0.09} />
+            <directionalLight position={[4.2, 5.2, 2.8]} intensity={1.7} color="#ffffff" />
+          </>
+        ) : (
+          <>
+            <fog attach="fog" args={["#0a0f1f", 2, 6]} />
+            <ambientLight intensity={0.52} />
+            <hemisphereLight args={["#d6edff", "#1c2433", 0.58]} />
+            <directionalLight position={[4, 5, 3]} intensity={1.5} color="#ffffff" />
+            <directionalLight position={[-3.6, 1.4, -3.2]} intensity={0.45} color="#8bc0e9" />
+            <pointLight position={[0, 0.4, -2.4]} intensity={0.32} color="#66b8ff" />
+            <spotLight position={[0, 2.8, 2.5]} angle={0.44} penumbra={0.7} intensity={0.32} color="#9ed8ff" />
+          </>
+        )}
 
-      <Canvas camera={{ position: [0, 0, 4.5], fov: 42 }}>
-        {/* Lighting rig for translucent medical look */}
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[5, 5, 5]} intensity={1.2} color="#ffffff" />
-        <directionalLight position={[-4, -3, -4]} intensity={0.3} color="#8ecae6" />
-        <pointLight position={[0, 2, 3]} intensity={0.6} color="#90cdf4" />
-        <pointLight position={[-2, -1, 2]} intensity={0.3} color="#bee3f8" />
-
-        {/* Rim light for CT-scan edge glow */}
-        <pointLight position={[0, 0, -3]} intensity={0.4} color="#00ccff" />
-        <spotLight
-          position={[0, 3, 2]}
-          angle={0.5}
-          penumbra={0.8}
-          intensity={0.3}
-          color="#66bbff"
-        />
-
-        {/* Soft environment fill */}
-        <hemisphereLight args={["#bde0fe", "#2b3a4e", 0.4]} />
-
-        <LungScene
-          focusRegion={focusRegion}
-          diseaseLabel={diseaseLabel}
-          animate={animate}
-        />
+        {glbFailed ? (
+          <ProceduralFallback
+            focusRegion={fr}
+            diseaseLabel={diseaseLabel}
+            progressionStage={progressionStage}
+            renderMode={renderMode}
+          />
+        ) : (
+          <GLTFLungSystem
+            focusRegion={fr}
+            diseaseLabel={diseaseLabel}
+            animate={animate}
+            renderMode={renderMode}
+            progressionStage={progressionStage}
+            onLoadFailed={() => setGlbFailed(true)}
+          />
+        )}
 
         <OrbitControls
-          enablePan={false}
-          minDistance={2.5}
-          maxDistance={7}
-          autoRotate
-          autoRotateSpeed={0.4}
+          enablePan
+          enableDamping
+          dampingFactor={0.07}
+          minDistance={0.68}
+          maxDistance={7.4}
+          minPolarAngle={0.01}
+          maxPolarAngle={Math.PI - 0.01}
+          rotateSpeed={0.85}
+          zoomSpeed={1.2}
+          panSpeed={0.55}
+          autoRotate={false}
         />
       </Canvas>
 
-      {/* Top-left CT scan badge */}
-      <div className="absolute top-3 left-3 flex items-center gap-2">
-        <div className="rounded-md bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1">
-          <span className="text-[10px] font-mono font-semibold text-cyan-400 tracking-wider">
-            CT RENDER
-          </span>
-        </div>
-        <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1">
-          <span className="text-[10px] font-mono font-semibold text-emerald-400 tracking-wider">
-            3D VOLUMETRIC
-          </span>
-        </div>
+      <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setRenderMode("standard")}
+          className={`rounded-md border px-3 py-1.5 text-[10px] font-mono font-semibold tracking-wider ${
+            renderMode === "standard"
+              ? "border-cyan-300/50 bg-cyan-500/20 text-cyan-100"
+              : "border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
+          }`}
+        >
+          STANDARD
+        </button>
+        <button
+          type="button"
+          onClick={() => setRenderMode("ct")}
+          className={`rounded-md border px-3 py-1.5 text-[10px] font-mono font-semibold tracking-wider ${
+            renderMode === "ct"
+              ? "border-emerald-300/50 bg-emerald-500/20 text-emerald-100"
+              : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+          }`}
+        >
+          CT MODE
+        </button>
+        <button
+          type="button"
+          onClick={() => setRenderMode("qa")}
+          className={`rounded-md border px-3 py-1.5 text-[10px] font-mono font-semibold tracking-wider ${
+            renderMode === "qa"
+              ? "border-slate-100/60 bg-slate-500/25 text-slate-50"
+              : "border-slate-400/30 bg-slate-500/10 text-slate-300"
+          }`}
+        >
+          SILHOUETTE QA
+        </button>
       </div>
 
-      {/* Bottom overlay legend */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-3">
+      <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-slate-500/20 bg-slate-900/55 px-2 py-1 backdrop-blur-sm">
+        {[0, 1, 2, 3].map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setProgressionStage(s as 0 | 1 | 2 | 3)}
+            className={`rounded px-2 py-1 text-[10px] font-semibold ${
+              progressionStage === s
+                ? "bg-red-500/75 text-white"
+                : "bg-slate-700/60 text-slate-200 hover:bg-slate-600/70"
+            }`}
+          >
+            S{s}
+          </button>
+        ))}
+      </div>
+
+      <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
-          <div className="h-2.5 w-2.5 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]" />
-          <span className="text-[10px] font-medium text-slate-400">
-            Infection Focus
-          </span>
+          <div className="h-2.5 w-2.5 rounded-full bg-green-400" />
+          <span className="text-[10px] font-medium text-slate-300">Low AI Risk</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="h-2.5 w-2.5 rounded-full bg-sky-300/50" />
-          <span className="text-[10px] font-medium text-slate-400">
-            Lung Tissue
-          </span>
+          <div className="h-2.5 w-2.5 rounded-full bg-yellow-400" />
+          <span className="text-[10px] font-medium text-slate-300">Moderate Risk</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="h-2.5 w-2.5 rounded-full bg-red-800/50" />
-          <span className="text-[10px] font-medium text-slate-400">
-            Vasculature
-          </span>
+          <div className="h-2.5 w-2.5 rounded-full bg-red-500" />
+          <span className="text-[10px] font-medium text-slate-300">High Risk</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="h-2.5 w-2.5 rounded-full bg-pink-300/50" />
-          <span className="text-[10px] font-medium text-slate-400">
-            Alveoli
-          </span>
+          <div className="h-2.5 w-2.5 rounded-full bg-orange-300 shadow-[0_0_8px_rgba(251,146,60,0.8)]" />
+          <span className="text-[10px] font-medium text-slate-300">Active Lesion</span>
         </div>
       </div>
     </div>

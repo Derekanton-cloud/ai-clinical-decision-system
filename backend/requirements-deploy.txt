@@ -1,0 +1,13 @@
+# Core API/database dependencies only.  The complete research stack remains in
+# requirements.txt for installations that have sufficient memory and validated
+# model artifacts.  Optional AI routes report unavailable instead of blocking
+# core clinical workflow on a free-tier service.
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+pydantic==2.6.3
+sqlalchemy==2.0.27
+psycopg2-binary==2.9.9
+python-jose[cryptography]==3.3.0
+bcrypt==4.1.2
+fpdf2==2.7.8

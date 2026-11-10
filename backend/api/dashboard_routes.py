@@ -51,7 +51,7 @@ def get_monitoring_data(
     patient = (
         db.query(Patient)
         .filter(
-            Patient.patient_id == patient_id,
+            Patient.patient_id == uuid.UUID(patient_id),
             Patient.hospital_id == current_user.hospital_id,
         )
         .first()
@@ -61,7 +61,7 @@ def get_monitoring_data(
 
     records = (
         db.query(Monitoring)
-        .filter(Monitoring.patient_id == patient_id)
+        .filter(Monitoring.patient_id == uuid.UUID(patient_id))
         .order_by(Monitoring.recorded_at.desc())
         .limit(60)
         .all()

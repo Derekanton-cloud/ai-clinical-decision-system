@@ -53,7 +53,7 @@ def create_case(
     patient = (
         db.query(Patient)
         .filter(
-            Patient.patient_id == request.patient_id,
+            Patient.patient_id == uuid.UUID(request.patient_id),
             Patient.hospital_id == current_user.hospital_id,
         )
         .first()
@@ -128,7 +128,7 @@ def get_patient_cases(
     patient = (
         db.query(Patient)
         .filter(
-            Patient.patient_id == patient_id,
+            Patient.patient_id == uuid.UUID(patient_id),
             Patient.hospital_id == current_user.hospital_id,
         )
         .first()
@@ -138,7 +138,7 @@ def get_patient_cases(
 
     cases = (
         db.query(Case)
-        .filter(Case.patient_id == patient_id)
+        .filter(Case.patient_id == uuid.UUID(patient_id))
         .order_by(Case.created_at.desc())
         .all()
     )
@@ -185,7 +185,7 @@ def update_case_status(
     case = (
         db.query(Case)
         .filter(
-            Case.case_id == case_id,
+            Case.case_id == uuid.UUID(case_id),
             Case.hospital_id == current_user.hospital_id,
         )
         .first()

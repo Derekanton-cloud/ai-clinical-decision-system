@@ -20,6 +20,7 @@ import { predictDisease, getGradCAM, getSHAPExplanation, generateReport, createC
 import AIPipelineStatus from "@/components/AIPipelineStatus";
 import PatientRegistration from "@/components/PatientRegistration";
 import { usePatient, type PatientInfo } from "@/lib/patient-context";
+import { useAuth } from "@/lib/auth-context";
 import {
   BarChart,
   Bar,
@@ -32,7 +33,7 @@ import {
 } from "recharts";
 
 const LungVisualization = lazy(
-  () => import("@/components/visualization/LungVisualization")
+  () => import("../../components/visualization/LungVisualization")
 );
 
 interface FocusRegion {
@@ -66,6 +67,7 @@ interface SHAPResult {
 
 export default function DiagnosisPage() {
   const { patient, setPatient } = usePatient();
+  const { user } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [symptoms, setSymptoms] = useState("");
@@ -77,6 +79,7 @@ export default function DiagnosisPage() {
   const [focusRegion, setFocusRegion] = useState<FocusRegion | null>(null);
   const [shapData, setShapData] = useState<SHAPResult | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [caseSaved, setCaseSaved] = useState(false);
   const [savedCaseCode, setSavedCaseCode] = useState<string | null>(null);
 
@@ -100,6 +103,7 @@ export default function DiagnosisPage() {
   const handleSubmit = async () => {
     if (!selectedFile || !symptoms.trim()) return;
     setLoading(true);
+    setReportError(null);
     setShowResults(false);
     setPipelineActive(true);
     try {
@@ -145,19 +149,35 @@ export default function DiagnosisPage() {
   const handleDownloadReport = async () => {
     if (!result) return;
     setReportLoading(true);
+    setReportError(null);
     try {
       const reportData = await generateReport({
         predicted_disease: result.predicted_disease,
         confidence: result.confidence,
         risk_level: result.risk_level,
         symptoms,
+        patient_age: patient ? String(patient.age) : "N/A",
+        patient_name: patient ? `${patient.first_name} ${patient.last_name}` : "Not Provided",
+        patient_code: patient?.patient_code || "N/A",
+        hospital_name: user?.hospital_name || "General Hospital",
+        requesting_clinician: user ? `${user.first_name} ${user.last_name}` : "AI Clinical Team",
+        scan_type: "Chest X-ray",
         gradcam_explanation: result.imaging_explanation || "",
         shap_explanation: result.symptom_explanation || "",
         uncertainty: result.uncertainty,
         region_detected: result.region_detected || undefined,
       });
+
+      if (!reportData?.pdf_base64 || typeof reportData.pdf_base64 !== "string") {
+        throw new Error("Report payload did not contain a PDF file.");
+      }
+
+      const normalizedBase64 = reportData.pdf_base64
+        .replace(/^data:application\/pdf;base64,/, "")
+        .replace(/\s/g, "");
+
       // Decode base64 PDF and trigger download
-      const byteCharacters = atob(reportData.pdf_base64);
+      const byteCharacters = atob(normalizedBase64);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -172,8 +192,9 @@ export default function DiagnosisPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      console.error("Report generation failed");
+    } catch (error) {
+      console.error("Report generation failed", error);
+      setReportError("Unable to generate report. Please try again in a few seconds.");
     } finally {
       setReportLoading(false);
     }
@@ -481,6 +502,12 @@ export default function DiagnosisPage() {
                 )}
                 {reportLoading ? "Generating Report..." : "Download Radiology Report"}
               </button>
+
+              {reportError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-sm font-medium text-red-700">{reportError}</p>
+                </div>
+              )}
 
               {/* Case Saved Indicator */}
               {caseSaved && savedCaseCode && (

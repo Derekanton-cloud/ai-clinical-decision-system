@@ -1,0 +1,6 @@
+{
+  "installCommand": "cd frontend/nextjs-dashboard && npm ci",
+  "buildCommand": "cd frontend/nextjs-dashboard && npm run build",
+  "outputDirectory": "frontend/nextjs-dashboard/.next",
+  "framework": "nextjs"
+}

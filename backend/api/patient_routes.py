@@ -104,7 +104,7 @@ def get_patient(
     patient = (
         db.query(Patient)
         .filter(
-            Patient.patient_id == patient_id,
+            Patient.patient_id == uuid.UUID(patient_id),
             Patient.hospital_id == current_user.hospital_id,
         )
         .first()

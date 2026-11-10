@@ -1,6 +1,5 @@
 import io
 import os
-import random
 
 import torch
 import torch.nn as nn
@@ -12,6 +11,8 @@ from PIL import Image
 # ── paths ──
 _MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 _WEIGHTS_PATH = os.path.join(_MODEL_DIR, "xray_model.pt")
+_MANIFEST_PATH = os.path.join(_MODEL_DIR, "xray_model.manifest.json")
+from models.artifact_status import model_artifact_status
 
 # ── class labels (must match training order) ──
 CLASS_NAMES = ["normal", "pneumonia"]
@@ -38,20 +39,20 @@ class DiseaseModel:
 
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = _build_model(num_classes=len(CLASS_NAMES))
-
-        if os.path.exists(_WEIGHTS_PATH):
+        self.available, self.unavailable_reason = model_artifact_status()
+        self.model = None
+        if self.available:
+            self.model = _build_model(num_classes=len(CLASS_NAMES))
             state_dict = torch.load(_WEIGHTS_PATH, map_location=self.device, weights_only=True)
             self.model.load_state_dict(state_dict)
-            print(f"[DiseaseModel] Loaded weights from {_WEIGHTS_PATH} on {self.device}")
-        else:
-            print(f"[DiseaseModel] WARNING: weights not found at {_WEIGHTS_PATH}, using random weights")
-
-        self.model.to(self.device)
-        self.model.eval()
+            self.model.to(self.device)
+            self.model.eval()
+            print(f"[DiseaseModel] Manifested weights loaded on {self.device}")
 
     def predict_from_image(self, image_bytes: bytes) -> dict:
         """Run real EfficientNet inference on an X-ray image."""
+        if not self.available or self.model is None:
+            return {"available": False, "reason": self.unavailable_reason}
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         tensor = _PREPROCESS(image).unsqueeze(0).to(self.device)
 
@@ -87,5 +88,6 @@ class DiseaseModel:
                 predicted = disease
                 break
 
-        confidence = round(random.uniform(0.65, 0.95), 2)
-        return {"disease": predicted, "confidence": confidence}
+        matched = sum(keyword in symptoms.lower() for keyword in symptom_keywords)
+        return {"disease": predicted, "confidence": None, "matched_rule_count": matched,
+                "model_type": "rule-based suggestion", "clinical_validation": False}

@@ -210,7 +210,7 @@ Backend startup:
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+../.venv/Scripts/python -m uvicorn main:app --reload --port 8000
 ```
 
 Frontend startup:

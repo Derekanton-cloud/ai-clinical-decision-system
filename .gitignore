@@ -41,5 +41,6 @@ backend/logs/
 *.pkl
 ai-training/datasets/chest_xray/
 data/
+*.db
 
 # If you want these tracked later, remove entries above and re-add explicitly.

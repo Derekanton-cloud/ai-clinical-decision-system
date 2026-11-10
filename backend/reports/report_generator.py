@@ -17,6 +17,10 @@ class ReportGenerator:
         risk_level: str,
         symptoms: str,
         patient_age: str = "N/A",
+        patient_name: str = "Not Provided",
+        patient_code: str = "N/A",
+        hospital_name: str = "General Hospital",
+        requesting_clinician: str = "AI Clinical Team",
         scan_type: str = "Chest X-ray",
         gradcam_explanation: str = "",
         shap_explanation: str = "",
@@ -26,7 +30,8 @@ class ReportGenerator:
     ) -> dict:
         report = self._build_report(
             predicted_disease, confidence, risk_level, symptoms,
-            patient_age, scan_type, gradcam_explanation, shap_explanation,
+            patient_age, patient_name, patient_code, hospital_name,
+            requesting_clinician, scan_type, gradcam_explanation, shap_explanation,
             recommended_tests, uncertainty, region_detected,
         )
         pdf_b64 = self._generate_pdf(report)
@@ -43,6 +48,10 @@ class ReportGenerator:
         risk_level: str,
         symptoms: str,
         patient_age: str,
+        patient_name: str,
+        patient_code: str,
+        hospital_name: str,
+        requesting_clinician: str,
         scan_type: str,
         gradcam_explanation: str,
         shap_explanation: str,
@@ -53,10 +62,17 @@ class ReportGenerator:
         if recommended_tests is None:
             recommended_tests = self._get_default_tests(predicted_disease)
 
+        generated_at = datetime.now().isoformat()
+
         return {
-            "title": "AI RADIOLOGY REPORT",
-            "generated_at": datetime.now().isoformat(),
+            "title": "RADIOLOGY DIAGNOSTIC REPORT",
+            "generated_at": generated_at,
+            "hospital_name": hospital_name,
+            "requesting_clinician": requesting_clinician,
             "patient_age": patient_age,
+            "patient_name": patient_name,
+            "patient_code": patient_code,
+            "report_id": f"RAD-{generated_at.replace('-', '').replace(':', '').replace('T', '-')[:15]}",
             "scan_type": scan_type,
             "sections": {
                 "findings": (
@@ -94,6 +110,10 @@ class ReportGenerator:
                     f"4. Follow institutional protocols for {predicted_disease} management.\n"
                     f"5. Schedule follow-up assessment as appropriate."
                 ),
+                "impression": (
+                    f"Radiographic and symptom-linked AI features are most compatible with {predicted_disease}. "
+                    f"Overall risk is categorized as {risk_level.lower()} with an estimated confidence of {confidence * 100:.1f}%."
+                ),
             },
         }
 
@@ -112,47 +132,65 @@ class ReportGenerator:
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
 
-        # ── Header bar ──
-        pdf.set_fill_color(20, 60, 120)
-        pdf.rect(0, 0, 210, 35, "F")
-        pdf.set_font("Helvetica", "B", 22)
+        # Header bar
+        pdf.set_fill_color(18, 58, 106)
+        pdf.rect(0, 0, 210, 38, "F")
+        pdf.set_font("Helvetica", "B", 20)
         pdf.set_text_color(255, 255, 255)
-        pdf.set_y(8)
-        pdf.cell(0, 10, report["title"], new_x="LMARGIN", new_y="NEXT", align="C")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 6, "AI Clinical Decision Support System", new_x="LMARGIN", new_y="NEXT", align="C")
-        pdf.ln(12)
+        pdf.set_y(7)
+        pdf.cell(0, 8, self._safe_text(report.get("hospital_name", "General Hospital")), new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 6, self._safe_text(report["title"]), new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 5, "AI-Assisted Clinical Decision Support", new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.ln(10)
 
-        # ── Patient info row ──
+        # Patient and study details
         pdf.set_text_color(60, 60, 60)
         pdf.set_font("Helvetica", "", 10)
         generated = report["generated_at"][:19].replace("T", " ")
-        pdf.cell(60, 7, f"Patient Age: {report.get('patient_age', 'N/A')}")
-        pdf.cell(60, 7, f"Scan Type: {report.get('scan_type', 'Chest X-ray')}")
-        pdf.cell(0, 7, f"Date: {generated}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(4)
+        pdf.set_fill_color(247, 250, 252)
+        pdf.set_draw_color(216, 226, 236)
+        panel_y = pdf.get_y()
+        pdf.rect(10, panel_y, 190, 34, "DF")
+        pdf.ln(3)
+        pdf.cell(95, 6, f"Patient Name: {self._safe_text(report.get('patient_name', 'Not Provided'))}")
+        pdf.cell(0, 6, f"Patient Code: {self._safe_text(report.get('patient_code', 'N/A'))}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(95, 6, f"Patient Age: {self._safe_text(report.get('patient_age', 'N/A'))}")
+        pdf.cell(0, 6, f"Exam Type: {self._safe_text(report.get('scan_type', 'Chest X-ray'))}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(95, 6, f"Report ID: {self._safe_text(report.get('report_id', 'N/A'))}")
+        pdf.cell(0, 6, f"Generated: {generated}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, f"Requesting Clinician: {self._safe_text(report.get('requesting_clinician', 'AI Clinical Team'))}", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
 
-        # ── Separator ──
-        pdf.set_draw_color(20, 60, 120)
-        pdf.set_line_width(0.5)
+        # Separator
+        pdf.set_draw_color(18, 58, 106)
+        pdf.set_line_width(0.4)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(6)
 
-        # ── Findings ──
+        # Impression
+        self._section_header(pdf, "IMPRESSION")
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(25, 25, 25)
+        pdf.multi_cell(0, 6, self._safe_text(report["sections"]["impression"]))
+        pdf.ln(4)
+
+        # Findings
         self._section_header(pdf, "FINDINGS")
         pdf.set_font("Helvetica", "", 11)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 6, report["sections"]["findings"])
+        pdf.multi_cell(0, 6, self._safe_text(report["sections"]["findings"]))
         pdf.ln(5)
 
-        # ── Diagnosis ──
+        # Diagnosis
         self._section_header(pdf, "DIAGNOSIS")
         pdf.set_font("Helvetica", "B", 13)
         pdf.set_text_color(180, 30, 30)
-        pdf.cell(0, 8, report["sections"]["diagnosis"], new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, self._safe_text(report["sections"]["diagnosis"]), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
-        # ── Risk Level ──
+        # Risk Level
         risk = report["sections"]["risk_level"]
         risk_colors = {
             "Low": (34, 197, 94), "Moderate": (234, 179, 8),
@@ -161,42 +199,42 @@ class ReportGenerator:
         r, g, b = risk_colors.get(risk, (100, 100, 100))
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(r, g, b)
-        pdf.cell(0, 8, f"Risk Level: {risk}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f"Risk Level: {self._safe_text(risk)}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
-        # ── Recommended Tests ──
+        # Recommended Tests
         self._section_header(pdf, "RECOMMENDED TESTS")
         pdf.set_font("Helvetica", "", 11)
         pdf.set_text_color(40, 40, 40)
         for test in report["sections"]["recommended_tests"]:
             pdf.cell(5)
-            pdf.cell(0, 6, f"\u2022  {test}", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, f"- {self._safe_text(test)}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(5)
 
-        # ── AI Explanation ──
+        # AI Explanation
         self._section_header(pdf, "AI EXPLANATION")
         pdf.set_font("Helvetica", "", 11)
         pdf.set_text_color(40, 40, 40)
         ai = report["sections"]["ai_explanation"]
-        pdf.multi_cell(0, 6, f"Grad-CAM: {ai['gradcam']}")
+        pdf.multi_cell(0, 6, f"Grad-CAM: {self._safe_text(ai['gradcam'])}")
         pdf.ln(2)
-        pdf.multi_cell(0, 6, f"SHAP: {ai['shap']}")
+        pdf.multi_cell(0, 6, f"SHAP: {self._safe_text(ai['shap'])}")
         pdf.ln(5)
 
-        # ── Assessment ──
+        # Assessment
         self._section_header(pdf, "ASSESSMENT")
         pdf.set_font("Helvetica", "", 11)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 6, report["sections"]["assessment"])
+        pdf.multi_cell(0, 6, self._safe_text(report["sections"]["assessment"]))
         pdf.ln(5)
 
-        # ── Recommendations ──
+        # Recommendations
         self._section_header(pdf, "CLINICAL RECOMMENDATIONS")
         pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6, report["sections"]["recommendation"])
+        pdf.multi_cell(0, 6, self._safe_text(report["sections"]["recommendation"]))
         pdf.ln(8)
 
-        # ── Disclaimer ──
+        # Disclaimer
         pdf.set_draw_color(180, 180, 180)
         pdf.set_line_width(0.3)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
@@ -212,21 +250,29 @@ class ReportGenerator:
             "This system is not a substitute for professional medical judgment.",
         )
 
-        # ── Footer ──
+        # Footer
         pdf.set_y(-15)
         pdf.set_font("Helvetica", "", 7)
         pdf.set_text_color(160, 160, 160)
-        pdf.cell(0, 5, f"AI Clinical DSS v1.0.0 | Generated {generated}", align="C")
+        pdf.cell(0, 5, f"AI Clinical DSS v1.0.0 | Report {self._safe_text(report.get('report_id', 'N/A'))}", align="C")
 
-        buffer = io.BytesIO()
-        pdf.output(buffer)
-        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        try:
+            pdf_bytes = bytes(pdf.output(dest="S"))
+        except TypeError:
+            buffer = io.BytesIO()
+            pdf.output(buffer)
+            pdf_bytes = buffer.getvalue()
+        return base64.b64encode(pdf_bytes).decode("utf-8")
 
     def _section_header(self, pdf: FPDF, title: str) -> None:
         pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(20, 60, 120)
-        pdf.cell(0, 8, title, new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(20, 60, 120)
+        pdf.set_text_color(18, 58, 106)
+        pdf.cell(0, 8, self._safe_text(title), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(18, 58, 106)
         pdf.set_line_width(0.2)
         pdf.line(10, pdf.get_y(), 80, pdf.get_y())
         pdf.ln(3)
+
+    def _safe_text(self, value: str) -> str:
+        text = value if isinstance(value, str) else str(value)
+        return text.encode("latin-1", "replace").decode("latin-1")

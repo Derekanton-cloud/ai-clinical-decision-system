@@ -9,6 +9,7 @@ from torchvision import transforms
 from torchvision.models import efficientnet_b0
 from torch import nn
 from PIL import Image
+from models.artifact_status import model_artifact_status
 
 # ── paths (same model the backend uses for prediction) ──
 _MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models")
@@ -42,6 +43,9 @@ class GradCAM:
     _shared_device = None
 
     def __init__(self):
+        available, reason = model_artifact_status()
+        if not available:
+            raise RuntimeError(f"Grad-CAM is unavailable: {reason}")
         if GradCAM._shared_model is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model = _build_model(num_classes=len(CLASS_NAMES))
@@ -50,9 +54,6 @@ class GradCAM:
                 state_dict = torch.load(_WEIGHTS_PATH, map_location=device, weights_only=True)
                 model.load_state_dict(state_dict)
                 print(f"[GradCAM] Loaded weights from {_WEIGHTS_PATH} on {device}")
-            else:
-                print(f"[GradCAM] WARNING: weights not found at {_WEIGHTS_PATH}")
-
             model.to(device)
             model.eval()
             GradCAM._shared_model = model
