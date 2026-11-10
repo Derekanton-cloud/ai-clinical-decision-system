@@ -29,6 +29,15 @@ export async function login(data: {
   return res.json();
 }
 
+export async function demoLogin() {
+  const res = await fetch(`${API_BASE_URL}/auth/demo-login`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Demo login is unavailable" }));
+    throw new Error(err.detail || "Demo login is unavailable");
+  }
+  return res.json();
+}
+
 export async function getProfile() {
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: { ...getAuthHeaders() },

@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Loader2, ShieldCheck } from "lucide-react";
-import { login, getHospitals } from "@/lib/api";
+import { Activity, Loader2, Play, ShieldCheck } from "lucide-react";
+import { demoLogin, login, getHospitals } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
@@ -18,6 +18,7 @@ export default function LoginPage() {
     hospital: "",
   });
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -45,6 +46,28 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    if (loading || demoLoading) return;
+    setError("");
+    setDemoLoading(true);
+    try {
+      const res = await demoLogin();
+      loginUser(res.token, {
+        user_id: res.user_id,
+        first_name: res.first_name,
+        last_name: res.last_name,
+        role: res.role,
+        hospital_id: res.hospital_id,
+        hospital_name: res.hospital_name,
+      });
+      router.push("/");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Demo login failed");
+    } finally {
+      setDemoLoading(false);
     }
   };
 
@@ -156,7 +179,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || demoLoading}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 hover:shadow-xl disabled:opacity-50"
             >
               {loading ? (
@@ -167,6 +190,25 @@ export default function LoginPage() {
               {loading ? "Authenticating..." : "Sign In"}
             </button>
           </form>
+
+          <div className="my-5 flex items-center gap-3" aria-hidden="true">
+            <div className="h-px flex-1 bg-white/10" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-blue-200/50">or</span>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            disabled={loading || demoLoading}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-gradient-to-r from-cyan-500/20 to-blue-600/30 px-4 py-3 text-sm font-semibold text-cyan-50 shadow-lg shadow-cyan-900/20 transition-all hover:border-cyan-300/60 hover:from-cyan-500/30 hover:to-blue-600/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {demoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+            {demoLoading ? "Entering Demo Mode..." : "Demo Bypass"}
+          </button>
+          <p className="mt-2 text-center text-xs text-blue-200/70">
+            Explore the dashboard using a preconfigured demonstration account.
+          </p>
         </div>
 
         <p className="mt-6 text-center text-xs text-blue-300/50">

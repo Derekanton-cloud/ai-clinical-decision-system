@@ -15,6 +15,23 @@ from auth.auth_handler import hash_password
 def main() -> None:
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
+        os.environ["DEMO_LOGIN_ENABLED"] = "false"
+        assert client.post("/api/auth/demo-login").status_code == 404
+        os.environ["DEMO_LOGIN_ENABLED"] = "true"
+        os.environ["DEMO_PASSWORD"] = "DemoPassword123!"
+        demo_login = client.post("/api/auth/demo-login")
+        assert demo_login.status_code == 200, demo_login.text
+        demo = demo_login.json()
+        assert demo["first_name"] == "Demo" and demo["last_name"] == "Clinician"
+        assert demo["role"] == "Radiologist"
+        demo_headers = {"Authorization": f"Bearer {demo['token']}"}
+        assert client.get("/api/auth/me", headers=demo_headers).status_code == 200
+        assert client.get("/api/dashboard/stats", headers=demo_headers).json()["patients_screened"] >= 3
+        assert len(client.get("/api/patients/search/?q=DEMO", headers=demo_headers).json()) >= 3
+        assert len(client.get("/api/cases/hospital", headers=demo_headers).json()) >= 3
+        # Repeat login verifies provisioning is idempotent rather than creating
+        # a new fictional account or duplicate records.
+        assert client.post("/api/auth/demo-login").json()["user_id"] == demo["user_id"]
         db = SessionLocal()
         hospital_name = f"Fictional Test Hospital {suffix}"
         hospital = Hospital(hospital_name=hospital_name, city="Test")

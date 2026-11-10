@@ -1,9 +1,11 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database.database import get_db
 from database.models import User, Hospital
 from auth.auth_handler import verify_password, hash_password, create_access_token, get_current_user
+from demo_tenant import ensure_demo_tenant
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -24,6 +26,11 @@ class LoginResponse(BaseModel):
     role: str
     hospital_id: str
     hospital_name: str
+
+
+def _login_response(user: User, hospital: Hospital) -> LoginResponse:
+    token = create_access_token({"user_id": str(user.user_id), "hospital_id": str(user.hospital_id), "role": user.role})
+    return LoginResponse(token=token, user_id=str(user.user_id), first_name=user.first_name, last_name=user.last_name, role=user.role, hospital_id=str(user.hospital_id), hospital_name=hospital.hospital_name)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -68,23 +75,19 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         user.password_hash = hash_password(request.password)
         db.commit()
 
-    token = create_access_token(
-        {
-            "user_id": str(user.user_id),
-            "hospital_id": str(user.hospital_id),
-            "role": user.role,
-        }
-    )
+    return _login_response(user, hospital)
 
-    return LoginResponse(
-        token=token,
-        user_id=str(user.user_id),
-        first_name=user.first_name,
-        last_name=user.last_name,
-        role=user.role,
-        hospital_id=str(user.hospital_id),
-        hospital_name=hospital.hospital_name,
-    )
+
+@router.post("/demo-login", response_model=LoginResponse)
+def demo_login(db: Session = Depends(get_db)):
+    """Issue a standard JWT for the only permitted fictional demo identity."""
+    if os.getenv("DEMO_LOGIN_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    password = os.getenv("DEMO_PASSWORD")
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Demo login is not configured")
+    hospital, user = ensure_demo_tenant(db, password)
+    return _login_response(user, hospital)
 
 
 @router.get("/me")

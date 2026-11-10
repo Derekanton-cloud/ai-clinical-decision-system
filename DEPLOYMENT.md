@@ -17,6 +17,14 @@ not need the Render URL.
    secure Render shell with `DEMO_PASSWORD` set. Share those credentials only
    through the agreed private channel.
 
+## Company demo bypass
+
+Set `DEMO_LOGIN_ENABLED=true` and a strong `DEMO_PASSWORD` only in the backend
+service environment. `POST /api/auth/demo-login` then creates (only once) and
+authenticates the fictional Demo Clinician at Harborview Demonstration Hospital.
+It also seeds linked fictional patients, cases, reports, and monitoring data.
+Set `DEMO_LOGIN_ENABLED=false` to make the endpoint return 404 immediately.
+
 ## AI operational status
 
 `backend/models/xray_model.pt` is deliberately ignored and is not deployed.
