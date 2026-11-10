@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Loader2, Play, ShieldCheck } from "lucide-react";
-import { demoLogin, login, getHospitals } from "@/lib/api";
+import { Activity, Loader2, Play, ShieldCheck, WifiOff } from "lucide-react";
+import { checkBackendHealth, demoLogin, login, getHospitals } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
@@ -19,12 +19,43 @@ export default function LoginPage() {
   });
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "ready" | "unavailable">("checking");
   const [error, setError] = useState("");
 
   useEffect(() => {
     getHospitals()
       .then(setHospitals)
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const deadline = Date.now() + 120_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const probe = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const healthy = await checkBackendHealth(controller.signal);
+      clearTimeout(timeout);
+      if (cancelled) return;
+      if (healthy) {
+        setBackendStatus("ready");
+        return;
+      }
+      if (Date.now() >= deadline) {
+        setBackendStatus("unavailable");
+        return;
+      }
+      setBackendStatus("checking");
+      timer = setTimeout(probe, 5_000);
+    };
+
+    probe();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -50,11 +81,27 @@ export default function LoginPage() {
   };
 
   const handleDemoLogin = async () => {
-    if (loading || demoLoading) return;
+    if (loading || demoLoading || backendStatus !== "ready") return;
     setError("");
     setDemoLoading(true);
     try {
-      const res = await demoLogin();
+      // A retry is safe: demo provisioning is idempotent and every success
+      // returns a fresh normal JWT for the same fictional clinician.
+      let res;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15_000);
+          res = await demoLogin(controller.signal);
+          clearTimeout(timeout);
+          break;
+        } catch (requestError) {
+          lastError = requestError;
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 3_000));
+        }
+      }
+      if (!res) throw lastError instanceof Error ? lastError : new Error("Demo login is unavailable. Please try again shortly.");
       loginUser(res.token, {
         user_id: res.user_id,
         first_name: res.first_name,
@@ -95,6 +142,19 @@ export default function LoginPage() {
           {error && (
             <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
               {error}
+            </div>
+          )}
+
+          {backendStatus === "checking" && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              Starting ClinicalAI services. This may take up to a minute.
+            </div>
+          )}
+          {backendStatus === "unavailable" && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              <WifiOff className="h-4 w-4 shrink-0" />
+              ClinicalAI services are still unavailable. You can use normal sign-in later or refresh to try Demo Bypass again.
             </div>
           )}
 
@@ -179,7 +239,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading || demoLoading}
+              disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 hover:shadow-xl disabled:opacity-50"
             >
               {loading ? (
@@ -200,11 +260,11 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={handleDemoLogin}
-            disabled={loading || demoLoading}
+            disabled={loading || demoLoading || backendStatus !== "ready"}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-gradient-to-r from-cyan-500/20 to-blue-600/30 px-4 py-3 text-sm font-semibold text-cyan-50 shadow-lg shadow-cyan-900/20 transition-all hover:border-cyan-300/60 hover:from-cyan-500/30 hover:to-blue-600/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {demoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
-            {demoLoading ? "Entering Demo Mode..." : "Demo Bypass"}
+            {demoLoading ? "Entering Demo Mode..." : backendStatus === "checking" ? "Starting Demo Services..." : "Demo Bypass"}
           </button>
           <p className="mt-2 text-center text-xs text-blue-200/70">
             Explore the dashboard using a preconfigured demonstration account.

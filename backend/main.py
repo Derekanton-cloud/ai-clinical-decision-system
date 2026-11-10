@@ -24,7 +24,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-cors_origins = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if item.strip()]
+cors_origins = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,https://ai-clinical-decision-system.onrender.com").split(",") if item.strip()]
 
 app.add_middleware(
     CORSMiddleware,

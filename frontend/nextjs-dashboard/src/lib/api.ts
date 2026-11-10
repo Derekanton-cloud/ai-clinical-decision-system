@@ -2,6 +2,19 @@
 // needed for an explicit local split-stack setup.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
+export async function checkBackendHealth(signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`, {
+      method: "GET",
+      cache: "no-store",
+      signal,
+    });
+    return response.ok && (await response.json()).status === "healthy";
+  } catch {
+    return false;
+  }
+}
+
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token = localStorage.getItem("token");
@@ -29,8 +42,8 @@ export async function login(data: {
   return res.json();
 }
 
-export async function demoLogin() {
-  const res = await fetch(`${API_BASE_URL}/auth/demo-login`, { method: "POST" });
+export async function demoLogin(signal?: AbortSignal) {
+  const res = await fetch(`${API_BASE_URL}/auth/demo-login`, { method: "POST", signal });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Demo login is unavailable" }));
     throw new Error(err.detail || "Demo login is unavailable");
